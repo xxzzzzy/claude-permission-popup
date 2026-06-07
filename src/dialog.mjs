@@ -1,17 +1,39 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
-// Notification sound played when a dialog appears. A macOS built-in system
-// sound — change the name (Glass, Tink, Hero, Ping, Pop, Submarine, ...) or set
-// to "" to disable. Fire-and-forget: never blocks or fails the dialog.
+// WSL detection: both WSL1 and WSL2 put "microsoft" in osrelease. Cheap, runs
+// at module load — no syscall storm.
+const isWSL =
+  process.platform === "linux" &&
+  (() => {
+    try {
+      return /microsoft/i.test(readFileSync("/proc/sys/kernel/osrelease", "utf8"));
+    } catch {
+      return false;
+    }
+  })();
+
 const SOUND = "Bottle";
 
 function playSound() {
-  if (!SOUND) return;
-  try {
-    execFile("/usr/bin/afplay", [`/System/Library/Sounds/${SOUND}.aiff`], () => {});
-  } catch {
-    /* sound is best-effort; ignore any failure */
+  // macOS: native system sound via afplay.
+  if (process.platform === "darwin" && SOUND) {
+    try {
+      execFile("/usr/bin/afplay", [`/System/Library/Sounds/${SOUND}.aiff`], () => {});
+    } catch {
+      /* sound is best-effort; ignore any failure */
+    }
+  } else if (isWSL) {
+    // Windows: built-in system sound. Fire-and-forget so it never blocks.
+    try {
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", "[System.Media.SystemSounds]::Asterisk.Play()"],
+        () => {},
+      );
+    } catch {
+      /* sound is best-effort; ignore any failure */
+    }
   }
 }
 
@@ -29,7 +51,7 @@ function playSound() {
 // that fallback fired a SECOND dialog whenever the cancel button was clicked
 // (it raises error -128, which the fallback mistook for "the icon failed"), so
 // "Back" popped two dialogs.
-export function showDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec }) {
+function showMacDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec }) {
   const cancelClause = cancelButton ? " cancel button cb" : "";
   const iconClause = iconPath && existsSync(iconPath) ? " with icon (POSIX file iconPath)" : "";
   const script = `on run argv
@@ -63,4 +85,64 @@ end run`;
     );
     child.stdin.end(script);
   });
+}
+
+// WSL path: a 3-button Windows dialog via System.Windows.Forms.MessageBox.
+//
+// MessageBox only supports a FIXED enum for buttons (OK / OKCancel / YesNo /
+// YesNoCancel / etc.). YesNoCancel is the only 3-button choice. We map:
+//   Yes    -> "Allow"  (one-time allow, same as macOS once)
+//   No     -> "Deny"   (same as macOS deny)
+//   Cancel -> "Back"   (abstain → fall through to Claude Code's native prompt)
+// Any non-Yes/No result (Cancel / window closed / timeout / unexpected) resolves
+// to null, which is the same "abstain" semantics as macOS Esc / timeout — the
+// popup never auto-approves and never persists any rule.
+//
+// The message is built in JS and passed as a single-quoted PowerShell string
+// (the only escape needed is doubling '). No shell interpolation, no PS injection.
+function showWSLDialog({ title, message, timeoutSec }) {
+  const psQuote = (s) => "'" + String(s ?? "").replace(/'/g, "''") + "'";
+  const script =
+    "Add-Type -AssemblyName System.Windows.Forms\n" +
+    `$r = [System.Windows.Forms.MessageBox]::Show(${psQuote(message)}, ${psQuote(title)}, 'YesNoCancel', 'Question')\n` +
+    "Write-Output $r\n";
+
+  playSound();
+  return new Promise((resolve) => {
+    const child = execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: (timeoutSec + 10) * 1000, maxBuffer: 1 << 20 },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        const out = String(stdout).trim();
+        if (out === "Yes") return resolve("Allow");
+        if (out === "No") return resolve("Deny");
+        // Cancel / closed / unexpected -> abstain (matches macOS Esc / timeout).
+        resolve(null);
+      },
+    );
+    // JS-side timer; kills the powershell process if it sits too long. Killing
+    // the child makes the execFile callback fire with err != null, which already
+    // resolves to null. This gives us the same auto-dismiss behavior as macOS's
+    // `giving up after N` — MessageBox itself has no native timeout.
+    const killTimer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* already exited */
+      }
+    }, timeoutSec * 1000);
+    child.on("exit", () => clearTimeout(killTimer));
+    child.stdin.end();
+  });
+}
+
+// Platform dispatcher. macOS -> osascript. WSL -> PowerShell MessageBox. Any
+// other platform (native Linux, Windows native, BSD) abstains — the hook exits
+// with no output and Claude Code falls back to its native prompt.
+export function showDialog(opts) {
+  if (process.platform === "darwin") return showMacDialog(opts);
+  if (isWSL) return showWSLDialog(opts);
+  return Promise.resolve(null);
 }

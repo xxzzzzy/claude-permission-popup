@@ -1,7 +1,7 @@
 {
   "name": "claude-permission-popup",
-  "version": "0.1.7",
-  "description": "Centered native macOS permission dialog for Claude Code.",
+  "version": "0.2.0",
+  "description": "Centered native permission dialog for Claude Code (macOS via osascript, WSL via PowerShell MessageBox).",
   "type": "module",
   "bin": {
     "claude-permission-popup": "cli.mjs"
@@ -10,13 +10,14 @@
     "test": "node --test"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "linux"
   ],
   "engines": {
     "node": ">=18"
   },
   "license": "MIT",
-  "author": "Melody",
+  "author": "Melody (original); WSL port by community",
   "keywords": [
     "claude-code",
     "claude",
@@ -25,7 +26,11 @@
     "permissionrequest",
     "macos",
     "dialog",
-    "osascript"
+    "osascript",
+    "wsl",
+    "windows",
+    "powershell",
+    "messagebox"
   ],
   "repository": {
     "type": "git",

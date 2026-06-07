@@ -1,12 +1,32 @@
 import { execSync, execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const isWSL =
+  process.platform === "linux" &&
+  (() => {
+    try {
+      return /microsoft/i.test(readFileSync("/proc/sys/kernel/osrelease", "utf8"));
+    } catch {
+      return false;
+    }
+  })();
+
+// --- macOS path (unchanged) ----------------------------------------------------
 
 // Claude Code pipes its JSON into the hook's stdin, so `tty` of this process is
 // not a real terminal — `$(tty)` fails. Walk the process tree (node → shell →
 // claude) reading each ancestor's controlling TTY via `ps` until one resolves.
 // Returns "/dev/ttysNNN" or "" if none found.
 export function findTty() {
-  const sh = (c) => { try { return execSync(c, { encoding: "utf8" }).trim(); } catch { return ""; } };
-  let pid = String(process.pid), hops = 0;
+  const sh = (c) => {
+    try {
+      return execSync(c, { encoding: "utf8" }).trim();
+    } catch {
+      return "";
+    }
+  };
+  let pid = String(process.pid),
+    hops = 0;
   while (pid && pid !== "0" && pid !== "1" && hops < 20) {
     const tty = sh(`ps -o tty= -p ${pid}`).trim();
     if (tty && tty !== "?" && tty !== "??") return "/dev/" + tty;
@@ -93,19 +113,59 @@ export function jumpArgs(tty, bid) {
   return [tty, bid];
 }
 
-// Bring the window running this Claude session to the front, so the user lands
-// back on the native permission prompt that abstaining triggers (the terminal
-// 1/2/3 prompt, or Claude Desktop's in-app prompt). Best-effort: any failure
-// (app closed, Automation permission denied) is swallowed — a nicety, never
-// load-bearing.
-export function jumpToTerminal() {
+function jumpToTerminalMac() {
   // __CFBundleIdentifier is set by macOS to the GUI app that launched this
   // process tree — the terminal host (iTerm2/Terminal/VS Code…) or Claude
   // Desktop itself.
   const args = jumpArgs(findTty(), process.env.__CFBundleIdentifier || "");
   if (!args) return;
   try {
-    execFileSync("/usr/bin/osascript", ["-", ...args],
-      { input: JUMP_SCRIPT, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] });
-  } catch {}
+    execFileSync(
+      "/usr/bin/osascript",
+      ["-", ...args],
+      { input: JUMP_SCRIPT, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] },
+    );
+  } catch {
+    /* best-effort; never load-bearing */
+  }
+}
+
+// --- WSL path (new) ------------------------------------------------------------
+//
+// "Raise the terminal" in WSL means "raise the Windows console host that owns
+// this session" — usually Windows Terminal, sometimes the legacy conhost (cmd
+// / PowerShell). We don't try to identify a specific tab: WSL can't see the
+// Windows-side tab model, and Claude Code is typically the only thing in the
+// user's terminal, so activating the host is enough.
+//
+// Microsoft.VisualBasic.Interaction::AppActivate does an exact-substring match
+// against window titles and brings the first match to the foreground. We try a
+// list of common hosts in order; first hit wins. Missing host = silent no-op.
+const WSL_JUMP_SCRIPT = [
+  "Add-Type -AssemblyName Microsoft.VisualBasic",
+  // Order: most-likely hosts first. Trim() so trailing whitespace doesn't kill
+  // the substring match.
+  "$names = @('Windows Terminal','Command Prompt','PowerShell','WezTerm','Hyper','Tabby')",
+  "foreach ($n in $names) {",
+  "  if ([Microsoft.VisualBasic.Interaction]::AppActivate($n.Trim())) { return }",
+  "}",
+].join("\n");
+
+function jumpToTerminalWSL() {
+  try {
+    execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", WSL_JUMP_SCRIPT],
+      { timeout: 5000, stdio: ["ignore", "ignore", "ignore"] },
+    );
+  } catch {
+    /* best-effort; never load-bearing */
+  }
+}
+
+// Public entry: platform dispatcher.
+export function jumpToTerminal() {
+  if (process.platform === "darwin") return jumpToTerminalMac();
+  if (isWSL) return jumpToTerminalWSL();
+  // Non-WSL Linux / Windows native: no-op.
 }

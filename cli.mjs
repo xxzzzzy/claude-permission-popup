@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { homedir, platform } from "node:os";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cp, mkdir } from "node:fs/promises";
@@ -10,11 +11,30 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEST = join(homedir(), ".claude/hooks/claude-permission-popup");
 const SETTINGS = join(homedir(), ".claude/settings.json");
 
+// Supported platforms: macOS (osascript) and WSL (PowerShell MessageBox). Native
+// Linux / Windows / BSD / etc. are NOT supported by this build — they need a
+// different dialog backend (zenity / kdialog / WPF) that isn't shipped yet.
+function detectPlatform() {
+  if (platform() === "darwin") return "darwin";
+  if (platform() === "linux") {
+    try {
+      if (/microsoft/i.test(readFileSync("/proc/sys/kernel/osrelease", "utf8"))) return "wsl";
+    } catch {
+      /* not Linux, or /proc missing */
+    }
+  }
+  return "unsupported";
+}
+
 async function install() {
-  if (platform() !== "darwin") {
-    console.error("claude-permission-popup is macOS-only (it uses osascript). Aborting.");
+  const detected = detectPlatform();
+  if (detected === "unsupported") {
+    console.error("claude-permission-popup currently supports macOS and WSL only.");
+    console.error("Detected: " + platform() + " (no Microsoft kernel marker found).");
+    console.error("For native Linux, see the README — a zenity-based port is on the roadmap.");
     process.exit(1);
   }
+
   // No ~/.claude usually means Claude Code isn't installed — registering a hook
   // there would be a no-op. Warn and abort unless the user insists with --force.
   if (!existsSync(join(homedir(), ".claude")) && !process.argv.includes("--force")) {
@@ -35,6 +55,12 @@ async function install() {
   await updateSettings(SETTINGS, (s) => addHook(s, command));
   console.log("✓ Installed to", DEST);
   console.log("✓ Registered PermissionRequest hook in", SETTINGS, "(backup at .bak)");
+  console.log("✓ Detected platform:", detected);
+  if (detected === "wsl") {
+    console.log("");
+    console.log("  The dialog will appear as a Windows MessageBox (Yes / No / Cancel).");
+    console.log("  Make sure powershell.exe is in your WSL PATH (default on WSL2).");
+  }
   console.log("Restart Claude Code (or run /hooks) to activate.");
 }
 
