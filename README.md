@@ -32,8 +32,14 @@ so you can approve or deny without switching back to the terminal.
 
 ## Install
 
+> **Important:** `npx claude-permission-popup` (without a GitHub path) resolves
+> to the **upstream macOS-only package on npm** — NOT this fork. To install
+> this WSL-aware fork, point `npx` at this repository explicitly.
+
+**From this fork (recommended):**
+
 ```bash
-npx claude-permission-popup install
+npx github:xxzzzzy/claude-permission-popup install
 ```
 
 Or, if you prefer a one-liner that checks for Node first:
@@ -44,11 +50,45 @@ curl -fsSL https://raw.githubusercontent.com/xxzzzzy/claude-permission-popup/mai
 
 (The script only checks for Node and powershell.exe (WSL), then runs the installer — it never installs Node for you.)
 
+**Other install methods:**
+
+```bash
+# Full git URL
+npx git+https://github.com/xxzzzzy/claude-permission-popup.git install
+
+# Clone + npm link
+git clone https://github.com/xxzzzzy/claude-permission-popup.git
+cd claude-permission-popup
+npm link
+claude-permission-popup install
+```
+
 Restart Claude Code (or run `/hooks`) to activate. Uninstall:
 
 ```bash
-npx claude-permission-popup uninstall
+npx github:xxzzzzy/claude-permission-popup uninstall
 ```
+
+## How the install picks the right dialog
+
+The install command is the **same** for macOS and WSL — there is one fork,
+and `npx github:xxzzzzy/claude-permission-popup` resolves to it on both
+systems. The fork's runtime is **system-aware**:
+
+- `npm` allows the install on `darwin` and `linux` (per `os` in
+  `package.json`). On `win32` (Windows native, no WSL) it refuses with
+  `EBADPLATFORM` — and you should run the install from WSL anyway, where
+  the dialog actually makes sense.
+- On first hook invocation, `detectPlatform()` in `cli.mjs` runs at
+  runtime to pick the correct code path:
+  - **macOS** → `showMacDialog` (AppleScript via `osascript`).
+  - **WSL** → `showWSLDialog` (Windows `MessageBox` via `powershell.exe`).
+  - **Native Linux / Windows native / BSD** → friendly refusal pointing
+    back at this README.
+
+So a single `npx github:xxzzzzy/claude-permission-popup install` works for
+both your Mac-using and WSL-using teammates; the dialog they see just
+differs.
 
 ## The dialog
 

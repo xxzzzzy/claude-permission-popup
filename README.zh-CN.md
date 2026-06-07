@@ -28,11 +28,16 @@
 
 ## 安装
 
+> **重要**：`npx claude-permission-popup`（不带 GitHub 路径）会解析到 **npm 上的
+> 上游 macOS-only 包**——**不是**本 fork。装这个 WSL 适配版，必须显式指 GitHub。
+
+**装本 fork（推荐）：**
+
 ```bash
-npx claude-permission-popup install
+npx github:xxzzzzy/claude-permission-popup install
 ```
 
-或用一行命令先检查 Node：
+或一行命令先检查 Node：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xxzzzzy/claude-permission-popup/main/install.sh | bash
@@ -40,11 +45,41 @@ curl -fsSL https://raw.githubusercontent.com/xxzzzzy/claude-permission-popup/mai
 
 （脚本只检查 Node 和 `powershell.exe`（WSL），然后调用 installer——不会替你装 Node。）
 
+**其他装法：**
+
+```bash
+# 完整 git URL
+npx git+https://github.com/xxzzzzy/claude-permission-popup.git install
+
+# 克隆 + npm link
+git clone https://github.com/xxzzzzy/claude-permission-popup.git
+cd claude-permission-popup
+npm link
+claude-permission-popup install
+```
+
 装完**重启 Claude Code** 或跑 `/hooks` 即可生效。卸载：
 
 ```bash
-npx claude-permission-popup uninstall
+npx github:xxzzzzy/claude-permission-popup uninstall
 ```
+
+## 安装怎么选弹窗
+
+macOS 和 WSL 用的是**同一行**安装命令——只有一个 fork，`npx
+github:xxzzzzy/claude-permission-popup` 在两个系统上都会解析到它。
+本 fork **运行时按系统分发**：
+
+- `npm` 允许在 `darwin` 和 `linux` 上装（看 `package.json` 的 `os` 字段）。
+  在 `win32`（Windows 原生，无 WSL）上会**拒绝**并报 `EBADPLATFORM`——而且
+  你本来就应该在 WSL 里跑安装，弹窗才有意义。
+- 首次 hook 触发时，`cli.mjs` 的 `detectPlatform()` 在**运行时**挑代码路径：
+  - **macOS** → `showMacDialog`（AppleScript via `osascript`）
+  - **WSL** → `showWSLDialog`（Windows `MessageBox` via `powershell.exe`）
+  - **原生 Linux / Windows 原生 / BSD** → 友好拒绝 + 指向本 README
+
+所以**一次** `npx github:xxzzzzy/claude-permission-popup install`，你用 Mac 的同事
+和你用 WSL 的同事都能装；他们看到的弹窗不一样而已。
 
 ## 弹窗
 

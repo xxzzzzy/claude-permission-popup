@@ -35,5 +35,8 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Node $(node --version) found — installing claude-permission-popup…"
-exec npx --yes claude-permission-popup install
+echo "Node $(node --version) found — installing claude-permission-popup (WSL fork)…"
+# IMPORTANT: pin to the GitHub fork. Plain `npx --yes claude-permission-popup`
+# would resolve to the upstream macOS-only package on npm, not this fork.
+# See README "How the install picks the right dialog".
+exec npx --yes github:xxzzzzy/claude-permission-popup install
